@@ -166,6 +166,26 @@ Backups: [lnd-backup-restore.md](./lnd-backup-restore.md). Closing a channel mov
 
 AMI snapshot: stop LND (and bitcoind) before a snapshot if you need a consistent `wallet.db`. A snapshot of a running node can tear that file. This repo does not store snapshot IDs or account IDs.
 
+Before the AMI:
+
+```bash
+./shutdown-l402-aws.sh mainnet
+./shutdown-mainnet-aws.sh
+```
+
+Create the AMI from that stopped state. Do not run `docker compose down -v`.
+
+After the AMI, start the same volumes:
+
+```bash
+./startup-mainnet-aws.sh 3.90.159.146
+docker exec -it agent-payment-decision-lnd-mainnet \
+  lncli --lnddir=/home/lnd/.lnd --network=mainnet unlock
+./startup-l402-aws.sh mainnet
+```
+
+The chain volume is `agent-bitcoin_bitcoind-mainnet-prune20g` with `-prune=20000`. Do not create a new bitcoind volume, and do not point the compose file back at the retired `agent-bitcoin_bitcoind-mainnet-data` volume. A restart on the 20 GB volume should catch the tip, not download from block 0.
+
 ## 8. What this box is not
 
 - Not a public Merchant catalog. 8081 stays an allowlist of `/32`s.
