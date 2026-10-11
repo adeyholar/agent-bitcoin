@@ -1,3 +1,9 @@
+## Docs — AMI stop and start (2026-10-11)
+
+Document the AMI stop and start sequence.
+
+---
+
 ## Changed — Bitcoin stays up during AWS sync (2026-10-08)
 
 Bitcoin stays up while AWS chain sync progress is shown.
