@@ -14,6 +14,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from pynostr.key import PrivateKey
 
+from agent_bitcoin.bolt11_invoice import inspect_payment_hashes, resolve_lnd_pay_hash
+from agent_bitcoin.payment_attempts import begin_attempt, mark_succeeded
 from agent_bitcoin.nwc.bus import InMemoryNWCBus
 from agent_bitcoin.nwc.client import sign_response_event
 from agent_bitcoin.nwc.crypto import (
@@ -252,18 +254,27 @@ class NWCService:
         if not invoice:
             raise NWCPolicyError("pay_invoice requires invoice", code="OTHER")
 
+        seen = inspect_payment_hashes(invoice)
+        if seen is not None and seen[0] > 1:
+            raise NWCError("duplicate_payment_hash")
+
+        decoded: dict[str, Any] | None = None
+        try:
+            raw_decoded = self.lnd.decode_pay_req(invoice)
+            if isinstance(raw_decoded, dict):
+                decoded = raw_decoded
+        except Exception as e:
+            if params.get("amount") is None:
+                raise NWCError(f"failed to decode invoice: {e}") from e
+
         amount_sats: int | None = None
         if params.get("amount") is not None:
             amount_sats = msats_to_sats(int(params["amount"]))
-        else:
-            try:
-                decoded = self.lnd.decode_pay_req(invoice)
-                if decoded.get("num_satoshis") is not None:
-                    amount_sats = int(decoded["num_satoshis"])
-                elif decoded.get("num_msat") is not None:
-                    amount_sats = msats_to_sats(int(decoded["num_msat"]))
-            except Exception as e:
-                raise NWCError(f"failed to decode invoice: {e}") from e
+        elif decoded is not None:
+            if decoded.get("num_satoshis") is not None:
+                amount_sats = int(decoded["num_satoshis"])
+            elif decoded.get("num_msat") is not None:
+                amount_sats = msats_to_sats(int(decoded["num_msat"]))
 
         if amount_sats is None:
             raise NWCPolicyError(
@@ -274,13 +285,24 @@ class NWCService:
             amount_sats, policy=self.budget, require_enable=False
         )
 
+        try:
+            pay_hash = resolve_lnd_pay_hash(invoice, decoded)
+            begin_attempt(pay_hash)
+        except ValueError as exc:
+            raise NWCError(str(exc)) from exc
+
         result = self.lnd.pay_invoice(invoice, fee_limit_sats=self.fee_limit_sats)
         success = bool(getattr(result, "success", False))
-        status = str(getattr(result, "status", "") or "")
-        if not success and status.upper() not in {"SUCCEEDED", "SUCCESS", "COMPLETE"}:
+        pay_status = str(getattr(result, "status", "") or "")
+        if not success and pay_status.upper() not in {
+            "SUCCEEDED",
+            "SUCCESS",
+            "COMPLETE",
+        }:
             raise NWCError(
-                f"payment failed: status={status!r}",
+                f"payment failed: status={pay_status!r}",
             )
+        mark_succeeded(pay_hash)
         payment_hash = getattr(result, "payment_hash", None) or ""
         # LND lncli rarely returns preimage in our PaymentResult model; use hash.
         preimage = payment_hash if payment_hash else "0" * 64

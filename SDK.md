@@ -238,6 +238,8 @@ There is **no platform / transaction fee**. Lightning **routing** fees are a sep
 2. The payer pays that invoice. Optional `routing_fee_limit_sats` caps Lightning routing fees.
 3. The full **X** is Lightning inbound on the payee. There is no separate Bitcoin fee payment.
 
+The routing fee limit and the invoice expiry are bounds, not guarantees. A payment can still fail inside them, and a failed attempt is not proof it will never settle. `pay_invoice` refuses a BOLT11 with more than one payment-hash field, and it refuses a payment hash already recorded as paid or in flight.
+
 ### Example (2,000 sats requested)
 
 | | Sats |

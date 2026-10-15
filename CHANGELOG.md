@@ -1,3 +1,9 @@
+## Changed — duplicate payment hash (2026-10-15)
+
+Reject BOLT11 invoices with duplicate payment hashes and refuse to retry a paid hash.
+
+---
+
 ## Docs — AMI stop and start (2026-10-11)
 
 Document the AMI stop and start sequence.

@@ -40,6 +40,24 @@ def _invoice(
     return encode(Bolt11(**kwargs), private_key=_PRIV)
 
 
+def _invoice_duplicate_payment_hash(second: str = "cc" * 32) -> str:
+    """Hand-built BOLT11 with two p tags. The bolt11 library keeps only the first."""
+    tags = Tags()
+    tags.add(TagChar.payment_hash, _HASH)
+    tags.add(TagChar.payment_hash, second)
+    tags.add(TagChar.payment_secret, _SECRET)
+    tags.add(TagChar.description, "coffee")
+    return encode(
+        Bolt11(
+            currency="bc",
+            date=2_000_000_000,
+            tags=tags,
+            amount_msat=MilliSatoshi(1_000_000),
+        ),
+        private_key=_PRIV,
+    )
+
+
 def _body(bolt11: str | None = "", **extra) -> bytes:
     payload: dict = dict(extra)
     if bolt11 is not None:
@@ -98,6 +116,40 @@ def test_expired_true_vs_false() -> None:
 def test_long_description_omitted() -> None:
     out = dec.handle_request(_body(_invoice(description="x" * 201)), now=_FIXED_NOW)
     assert "description" not in out
+
+
+def test_single_p_tag_is_one_hash() -> None:
+    from agent_bitcoin.bolt11_invoice import inspect_payment_hashes as sdk_inspect
+
+    raw = _invoice()
+    seen = dec.inspect_payment_hashes(raw)
+    assert seen == (1, (_HASH,))
+    assert sdk_inspect(raw) == seen
+
+
+def test_duplicate_payment_hash_rejected() -> None:
+    from agent_bitcoin.bolt11_invoice import inspect_payment_hashes as sdk_inspect
+
+    raw = _invoice_duplicate_payment_hash()
+    seen = dec.inspect_payment_hashes(raw)
+    assert seen is not None
+    assert seen[0] == 2
+    assert seen[1] == (_HASH, "cc" * 32)
+    assert sdk_inspect(raw) == seen
+    with pytest.raises(dec.DuplicatePaymentHash):
+        dec.handle_request(_body(raw), now=_FIXED_NOW)
+
+
+def test_origin_duplicate_payment_hash() -> None:
+    status, _ctype, body = dispatch(
+        "/paid/finance/ln-invoice-decode",
+        method="POST",
+        body=_body(_invoice_duplicate_payment_hash()),
+    )
+    assert status == 400
+    payload = json.loads(body)
+    assert payload == {"ok": False, "error": "duplicate_payment_hash"}
+    assert _HASH not in body.decode()
 
 
 def test_origin_400_invalid() -> None:

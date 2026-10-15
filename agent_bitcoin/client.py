@@ -8,6 +8,11 @@ from .constants import (
     min_payment_sats,
     current_network,
 )
+from .bolt11_invoice import (
+    inspect_payment_hashes,
+    payment_hash_from_decode,
+    resolve_lnd_pay_hash,
+)
 from .lightning import LNDClient
 from .models import (
     Invoice,
@@ -18,6 +23,7 @@ from .models import (
     LightningBalance,
     ChannelBalance,
 )
+from .payment_attempts import begin_attempt, mark_succeeded
 from .spend_ledger import assert_can_spend, record_spend
 
 load_dotenv()
@@ -160,6 +166,45 @@ class AgentBitcoinClient:
                 memo=q.memo,
             )
 
+    def _decode_for_pay(self, invoice: str) -> dict | None:
+        """Refuse a second ``p`` tag before LND decode. Return LND's dict or None."""
+        seen = inspect_payment_hashes(invoice)
+        if seen is not None and seen[0] > 1:
+            raise ValueError("duplicate_payment_hash")
+        try:
+            decoded = self.lnd.decode_pay_req(invoice)
+        except Exception:
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        return decoded
+
+    def _pay_recorded(
+        self,
+        invoice: str,
+        fee_limit_sats: int,
+        amount_sats: int,
+        decoded: dict | None,
+    ) -> PaymentResult:
+        """Pay only the hash LND decoded. Record it before the pay call."""
+        payment_hash = resolve_lnd_pay_hash(invoice, decoded)
+        begin_attempt(payment_hash)
+        result = self.lnd.pay_invoice(invoice, fee_limit_sats=fee_limit_sats)
+        if result.success:
+            mark_succeeded(payment_hash)
+            extra = payment_hash_from_decode(
+                {"payment_hash": str(getattr(result, "payment_hash", "") or "")}
+            )
+            if extra and extra != payment_hash:
+                mark_succeeded(extra)
+            recorded = amount_sats or int(getattr(result, "amount", 0) or 0)
+            if recorded > 0:
+                record_spend(
+                    recorded,
+                    payment_hash=getattr(result, "payment_hash", None) or payment_hash,
+                )
+        return result
+
     def pay_invoice(
         self, payment_request: str, fee_limit_sats: int = 200
     ) -> PaymentResult:
@@ -172,12 +217,9 @@ class AgentBitcoinClient:
                 "See docs/mainnet-pilot.md Phase 2."
             )
 
-        amount_sats = 0
-        try:
-            decoded = self.lnd.decode_pay_req(payment_request.strip())
-            amount_sats = _invoice_amount_sats(decoded)
-        except Exception:
-            decoded = {}
+        invoice = payment_request.strip()
+        decoded = self._decode_for_pay(invoice)
+        amount_sats = _invoice_amount_sats(decoded) if decoded else 0
 
         if amount_sats > 0:
             if amount_sats < self.min_payment_sats:
@@ -190,14 +232,7 @@ class AgentBitcoinClient:
                 )
             assert_can_spend(amount_sats, self.max_daily_payment_sats)
 
-        result = self.lnd.pay_invoice(
-            payment_request.strip(), fee_limit_sats=fee_limit_sats
-        )
-        if result.success:
-            recorded = amount_sats or int(result.amount or 0)
-            if recorded > 0:
-                record_spend(recorded, payment_hash=result.payment_hash)
-        return result
+        return self._pay_recorded(invoice, fee_limit_sats, amount_sats, decoded)
 
     def pay_invoice_quote(
         self,
@@ -210,6 +245,15 @@ class AgentBitcoinClient:
         total_cost_sats equals the requested amount (no platform fee).
         Daily/deposit ledger uses total_cost_sats.
         """
+        raw_request = (
+            quote.get("payment_request")
+            if isinstance(quote, dict)
+            else quote.payment_request
+        )
+        if isinstance(raw_request, str):
+            seen = inspect_payment_hashes(raw_request.strip())
+            if seen is not None and seen[0] > 1:
+                raise ValueError("duplicate_payment_hash")
         q = self.validate_invoice_quote(quote)
         if not autopay_allowed():
             raise RuntimeError(
@@ -227,12 +271,11 @@ class AgentBitcoinClient:
             )
         assert_can_spend(q.total_cost_sats, self.max_daily_payment_sats)
 
-        result = self.lnd.pay_invoice(
-            q.payment_request.strip(), fee_limit_sats=routing_fee_limit_sats
+        invoice = q.payment_request.strip()
+        decoded = self._decode_for_pay(invoice)
+        return self._pay_recorded(
+            invoice, routing_fee_limit_sats, q.total_cost_sats, decoded
         )
-        if result.success:
-            record_spend(q.total_cost_sats, payment_hash=result.payment_hash)
-        return result
 
     def send_onchain(self, address: str, amount_sats: int) -> OnChainSendResult:
         if not fee_send_allowed():

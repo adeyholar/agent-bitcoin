@@ -306,6 +306,9 @@ def dispatch(
         try:
             payload = _ln_invoice_decode.handle_request(body)
             return 200, "application/json", json.dumps(payload).encode("utf-8")
+        except _ln_invoice_decode.DuplicatePaymentHash:
+            err = {"ok": False, "error": "duplicate_payment_hash"}
+            return 400, "application/json", json.dumps(err).encode("utf-8")
         except _ln_invoice_decode.BadInvoice:
             err = {"ok": False, "error": "bad_invoice"}
             return 400, "application/json", json.dumps(err).encode("utf-8")

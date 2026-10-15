@@ -93,7 +93,7 @@ def test_end_to_end_rule_then_nwc(monkeypatch: pytest.MonkeyPatch) -> None:
             )
 
         def decode_pay_req(self, pr):
-            return {"num_satoshis": "2000"}
+            return {"num_satoshis": "2000", "payment_hash": "dd" * 32}
 
         def pay_invoice(self, pr, fee_limit_sats=200):
             return SimpleNamespace(

@@ -13,6 +13,15 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_payment_attempts(monkeypatch, tmp_path):
+    """Do not write the developer payment-attempt record during tests."""
+    monkeypatch.setenv(
+        "AGENT_BITCOIN_PAYMENT_ATTEMPTS",
+        str(tmp_path / "payment-attempts.json"),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _merchant_mock_isolation(monkeypatch):
     """Give each test its own localhost merchant mock port. No public relays."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
