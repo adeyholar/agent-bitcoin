@@ -82,9 +82,12 @@ def test_client_pay_enforces_amount_and_records(
     monkeypatch.setenv("AGENT_BITCOIN_SPEND_LEDGER", str(tmp_path / "s.json"))
     with patch("agent_bitcoin.client.LNDClient") as mock_cls:
         mock_lnd = MagicMock()
-        mock_lnd.decode_pay_req.return_value = {"num_satoshis": "2000"}
+        mock_lnd.decode_pay_req.return_value = {
+            "num_satoshis": "2000",
+            "payment_hash": "ab" * 32,
+        }
         mock_lnd.pay_invoice.return_value = MagicMock(
-            success=True, payment_hash="ph", amount=2000, status="SUCCEEDED"
+            success=True, payment_hash="ab" * 32, amount=2000, status="SUCCEEDED"
         )
         mock_cls.return_value = mock_lnd
         from agent_bitcoin.client import AgentBitcoinClient

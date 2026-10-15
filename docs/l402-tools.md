@@ -96,7 +96,7 @@ uv run python examples/l402_pay.py \
 
 ### POST `/paid/finance/ln-invoice-preflight`
 
-Job: reuse that parse and return `allow` plus reason codes (`expired`, `zero_amount`, `below_floor`, `above_max_sats`, `network_mismatch`). Floor is **100** sats. Not a route check.
+Job: reuse that parse and return `allow` plus reason codes (`expired`, `zero_amount`, `below_floor`, `above_max_sats`, `network_mismatch`, `duplicate_payment_hash`). More than one payment-hash (`p`) field is `allow: false` / `duplicate_payment_hash`. Floor is **100** sats. Not a route check.
 
 ```bash
 uv run python examples/l402_pay.py \

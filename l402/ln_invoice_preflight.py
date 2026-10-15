@@ -111,6 +111,13 @@ def handle_request(
     decode_body = json.dumps({"bolt11": invoice}).encode("utf-8")
     try:
         decoded = _decode.handle_request(decode_body, now=when)
+    except _decode.DuplicatePaymentHash:
+        return _envelope(
+            now=when,
+            allow=False,
+            reasons=["duplicate_payment_hash"],
+            amount_sats=None,
+        )
     except _decode.BadInvoice:
         return _envelope(
             now=when,

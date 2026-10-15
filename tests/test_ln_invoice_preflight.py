@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from l402 import ln_invoice_preflight as pf
 from l402.origin import dispatch
-from tests.test_ln_invoice_decode import _invoice
+from tests.test_ln_invoice_decode import _invoice, _invoice_duplicate_payment_hash
 
 _FIXED_NOW = datetime(2026, 9, 7, 20, 30, 0, tzinfo=timezone.utc)
 
@@ -92,6 +92,23 @@ def test_multiple_reasons() -> None:
     assert out["allow"] is False
     assert out["reasons"] == ["expired", "above_max_sats"]
     assert out["amount_sats"] == 80_000
+
+
+def test_duplicate_payment_hash() -> None:
+    raw = _invoice_duplicate_payment_hash()
+    out = pf.handle_request(_body(bolt11=raw), now=_FIXED_NOW)
+    assert out["ok"] is True
+    assert out["allow"] is False
+    assert out["reasons"] == ["duplicate_payment_hash"]
+    assert out["amount_sats"] is None
+    assert "expired" not in out
+    assert "network" not in out
+    assert "payment_hash" not in out
+    assert "bolt11" not in out
+    status, data = _post(_body(bolt11=raw))
+    assert status == 200
+    assert data["allow"] is False
+    assert data["reasons"] == ["duplicate_payment_hash"]
 
 
 def test_garbage_bolt11_200() -> None:
